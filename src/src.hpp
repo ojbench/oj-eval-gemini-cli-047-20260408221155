@@ -37,6 +37,8 @@ private:
     double v_max, r;
     Monitor *monitor;
     int round_count = 0;
+    Vec prev_pos_cur;
+    int stuck_count = 0;
 
     bool linearProgram1(const std::vector<Line>& lines, int lineNo, double radius, const Vec& optVelocity, bool directionOpt, Vec& result) {
         double dotProduct = lines[lineNo].point.dot(lines[lineNo].dir);
@@ -205,6 +207,15 @@ private:
 public:
 
     Vec get_v_next() {
+        if (round_count > 0) {
+            if ((pos_cur - prev_pos_cur).norm_sqr() < 1e-8) {
+                stuck_count++;
+            } else {
+                stuck_count = 0;
+            }
+        }
+        prev_pos_cur = pos_cur;
+
         Vec pref_v = pos_tar - pos_cur;
         double dist = pref_v.norm();
         if (dist > 1e-5) {
@@ -219,6 +230,18 @@ public:
             pref_v = pref_v + perturbation * 0.01;
         } else {
             pref_v = Vec(0, 0);
+        }
+
+        if (monitor->get_warning() || stuck_count > 5) {
+            // Rotate pref_v to the right to avoid head-on collisions
+            pref_v = pref_v.rotate(-PI / 2);
+            // Also add some random perturbation
+            double angle = (id * 137.5 + round_count * 17.3) * PI / 180.0;
+            Vec perturbation(std::cos(angle), std::sin(angle));
+            pref_v = pref_v + perturbation * (v_max * 0.5);
+            if (pref_v.norm_sqr() > v_max * v_max) {
+                pref_v = pref_v.normalize() * v_max;
+            }
         }
 
         std::vector<Line> lines;
@@ -238,15 +261,6 @@ public:
         int failedLine = linearProgram2(lines, v_max, pref_v, false, result);
         if (failedLine < lines.size()) {
             linearProgram3(lines, 0, failedLine, v_max, result);
-        }
-        
-        if (monitor->get_warning()) {
-            double angle = (id * 137.5 + round_count * 17.3) * PI / 180.0;
-            Vec perturbation(std::cos(angle), std::sin(angle));
-            result = result + perturbation * (v_max * 0.5);
-            if (result.norm_sqr() > v_max * v_max) {
-                result = result.normalize() * v_max;
-            }
         }
         
         round_count++;
